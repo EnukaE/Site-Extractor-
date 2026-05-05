@@ -130,8 +130,7 @@ if __name__ == "__main__":
     total_pages = get_total_pages()
     print(f"Total pages to scrape: {total_pages}")
 
-    all_data = []
-    seen = set()
+    all_data_map = {} # Phone Number -> Name
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         pages_to_scrape = range(1, total_pages + 1)
@@ -143,22 +142,29 @@ if __name__ == "__main__":
             try:
                 page_data = future.result()
                 for item in page_data:
-                    identifier = (item['Name'], item['Phone Number'])
-                    if identifier not in seen:
-                        all_data.append(item)
-                        seen.add(identifier)
+                    phone = item['Phone Number']
+                    name = item['Name']
+
+                    # Heuristic: if phone exists, keep the longer name (likely more complete)
+                    if phone in all_data_map:
+                        if len(name) > len(all_data_map[phone]):
+                            all_data_map[phone] = name
+                    else:
+                        all_data_map[phone] = name
 
                 completed += 1
                 if completed % 50 == 0:
-                    print(f"Progress: {completed}/{total_pages} pages scraped... ({len(all_data)} unique records)")
+                    print(f"Progress: {completed}/{total_pages} pages scraped... ({len(all_data_map)} unique phone numbers)")
             except Exception as exc:
                 print(f"Page {page_num} generated an exception: {exc}")
 
-    all_data.sort(key=lambda x: (x['Name'], x['Phone Number']))
+    # Convert map to list of dicts for sorting and writing
+    final_data = [{'Name': name, 'Phone Number': phone} for phone, name in all_data_map.items()]
+    final_data.sort(key=lambda x: (x['Name'], x['Phone Number']))
 
     with open('teachers.csv', 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=['Name', 'Phone Number'])
         writer.writeheader()
-        writer.writerows(all_data)
+        writer.writerows(final_data)
 
-    print(f"Scraping complete. Total unique records: {len(all_data)}")
+    print(f"Scraping complete. Total unique records: {len(final_data)}")
