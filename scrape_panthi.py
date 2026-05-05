@@ -45,28 +45,24 @@ def clean_name(name):
 
 def get_phone_numbers(text):
     # Match various phone number formats
-    # Sri Lankan numbers often start with 0 or +94 or 94
-    # Improved regex to handle spaces and dashes more robustly
     found = re.findall(r'(\+?94[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{4}|0\d{2}[\s\-]?\d{3}[\s\-]?\d{4}|0\d{9}|94\d{9})', text)
 
-    cleaned = []
+    normalized = []
     for num in found:
-        c = re.sub(r'[\s\+\-]', '', num)
-        # Standardize: we'll keep it as found but deduplicate based on digits
-        # Actually, let's keep the original format for better readability but deduplicate
-        if len(c) >= 9:
-            cleaned.append(num.strip())
+        digits = re.sub(r'\D', '', num)
 
-    # Deduplicate based on digits
-    unique_nums = {}
-    for n in cleaned:
-        digits = re.sub(r'\D', '', n)
         if digits.startswith('94'):
-             digits = '0' + digits[2:] # normalize 94... to 0...
-        if digits not in unique_nums:
-            unique_nums[digits] = n
+            if len(digits) == 11:
+                normalized.append(digits)
+            elif len(digits) > 11:
+                normalized.append(digits[:11])
+        elif digits.startswith('0'):
+            if len(digits) == 10:
+                normalized.append('94' + digits[1:])
+        elif len(digits) == 9:
+            normalized.append('94' + digits)
 
-    return list(unique_nums.values())
+    return list(set(normalized))
 
 def scrape_page(page_num):
     url = f"https://panthi.lk/?page={page_num}"
@@ -111,10 +107,11 @@ def scrape_page(page_num):
             phones.extend(get_phone_numbers(description_div.get_text()))
 
         if cleaned_name and phones:
-            listings.append({
-                'Name': cleaned_name,
-                'Phone Numbers': "; ".join(sorted(list(set(phones))))
-            })
+            for phone in set(phones):
+                listings.append({
+                    'Name': cleaned_name,
+                    'Phone Number': phone
+                })
 
     return listings
 
@@ -131,19 +128,12 @@ def get_total_pages():
 
 if __name__ == "__main__":
     total_pages = get_total_pages()
-    # For demonstration/safety, I'll limit to 50 pages for now OR I can just run all if I have time.
-    # The instructions say "From the entire website".
-    # I will run for 100 pages to show progress and then decide.
-    # Actually, I'll try to run for ALL but I'll add a way to stop if it takes too long.
-
     print(f"Total pages to scrape: {total_pages}")
 
     all_data = []
     seen = set()
 
-    # Using 10 workers for faster extraction
     with ThreadPoolExecutor(max_workers=10) as executor:
-        # Start with a subset to ensure everything is fine
         pages_to_scrape = range(1, total_pages + 1)
         future_to_page = {executor.submit(scrape_page, p): p for p in pages_to_scrape}
 
@@ -153,8 +143,7 @@ if __name__ == "__main__":
             try:
                 page_data = future.result()
                 for item in page_data:
-                    # Deduplicate based on Name + Phones
-                    identifier = (item['Name'], item['Phone Numbers'])
+                    identifier = (item['Name'], item['Phone Number'])
                     if identifier not in seen:
                         all_data.append(item)
                         seen.add(identifier)
@@ -165,11 +154,10 @@ if __name__ == "__main__":
             except Exception as exc:
                 print(f"Page {page_num} generated an exception: {exc}")
 
-    # Final sort
-    all_data.sort(key=lambda x: x['Name'])
+    all_data.sort(key=lambda x: (x['Name'], x['Phone Number']))
 
     with open('teachers.csv', 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['Name', 'Phone Numbers'])
+        writer = csv.DictWriter(f, fieldnames=['Name', 'Phone Number'])
         writer.writeheader()
         writer.writerows(all_data)
 
